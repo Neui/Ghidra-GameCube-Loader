@@ -20,7 +20,6 @@ import java.util.*;
 
 import gamecubeloader.apploader.ApploaderHeader;
 import gamecubeloader.apploader.ApploaderProgramBuilder;
-import gamecubeloader.common.Yaz0;
 import gamecubeloader.dol.DOLHeader;
 import gamecubeloader.dol.DOLProgramBuilder;
 import gamecubeloader.ramdump.RAMDumpProgramBuilder;
@@ -28,6 +27,7 @@ import gamecubeloader.rel.RELHeader;
 import gamecubeloader.rel.RELProgramBuilder;
 import gamecubeloader.rso.RSOHeader;
 import gamecubeloader.rso.RSOProgramBuilder;
+import gamecubeloader.yaz0.Yaz0;
 import ghidra.app.util.Option;
 import ghidra.app.util.OptionUtils;
 import ghidra.app.util.bin.BinaryReader;
@@ -50,22 +50,46 @@ import ghidra.util.exception.CancelledException;
 import ghidra.util.task.TaskMonitor;
 
 /**
- * TODO: Provide class-level documentation that describes what this loader does.
+ * This loader handles importing Nintendo GameCube and Nintendo Wii binaries.
+ * 
+ * <p>The following binaries are supported:
+ * <ul>
+ *  <li>GameCube .dol</li>
+ *  <li>GameCube & Wii .rel</li>
+ *  <li>.rso</li>
+ *  <li>Apploader</li>
+ *  <li>GameCube and Wii RAM Dumps</li>
+ * </ul>
  */
 public class GameCubeLoader extends BinaryLoader {
+    /**
+     * Main name of this importer.
+     * It'll be suffixed with the type of the binary to load.
+     * 
+     * @see #getName()
+     */
     public static final String BIN_NAME = "Nintendo GameCube/Wii Binary";
+
+    private static final String ADD_RESERVED_AND_HARDWAREREGISTERS = "Create OS global memory section & hardware register memory sections";
+    private static final String AUTOLOAD_MAPS_OPTION_NAME = "Automatically load symbol map files with corresponding names";
+    private static final String ADD_RELOCATIONS_OPTION_NAME = "Add relocation info to Relocation Table view (WARNING: Slow when using symbol maps)";
+    private static final String SPECIFY_BINARY_MEM_ADDRESSES = "Manually specify the memory address of each module loaded";
     
+    /**
+     * Supported binary types.
+     */
 	private static enum BinaryType {
 		DOL, REL, RSO, APPLOADER, RAMDUMP, UNKNOWN
 	}
 	
+	/**
+	 * Memory size of the main GameCube and Wii memory.
+	 */
 	private static final int RAM_MEM1_SIZE = 0x01800000;
 	
-	private static final String ADD_RESERVED_AND_HARDWAREREGISTERS = "Create OS global memory section & hardware register memory sections";
-	private static final String AUTOLOAD_MAPS_OPTION_NAME = "Automatically load symbol map files with corresponding names";
-	private static final String ADD_RELOCATIONS_OPTION_NAME = "Add relocation info to Relocation Table view (WARNING: Slow when using symbol maps)";
-	private static final String SPECIFY_BINARY_MEM_ADDRESSES = "Manually specify the memory address of each module loaded";
-	
+	/**
+	 * The binary type we are currently processing.
+	 */
 	private BinaryType binaryType = BinaryType.UNKNOWN;
 	private DOLHeader dolHeader;
 	private RELHeader relHeader;
@@ -94,9 +118,8 @@ public class GameCubeLoader extends BinaryLoader {
 	public Collection<LoadSpec> findSupportedLoadSpecs(ByteProvider provider) throws IOException {
 		List<LoadSpec> loadSpecs = new ArrayList<>();
 
-		Yaz0 yaz0 = new Yaz0();
-		if (yaz0.IsValid(provider)) {
-			provider = yaz0.Decompress(provider);
+		if (Yaz0.hasMagic(provider)) {
+			provider = Yaz0.parseAndDecompress(provider);
 			var reader = new BinaryReader(provider, false);
 			var header = new RELHeader(reader);
 			
@@ -214,9 +237,8 @@ public class GameCubeLoader extends BinaryLoader {
 	        	try {
 	        		// We have to check if the source file is compressed & decompress it again if it is.
 	        		var file = provider.getFile();
-	        		Yaz0 yaz0 = new Yaz0();
-	        		if (yaz0.IsValid(provider)) {
-	        			provider = yaz0.Decompress(provider);
+	        		if (Yaz0.hasMagic(provider)) {
+	        			provider = Yaz0.parseAndDecompress(provider);
 	        		}
 	        		
 					new RELProgramBuilder(relHeader, provider, program, monitor, file,

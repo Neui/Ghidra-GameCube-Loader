@@ -13,6 +13,7 @@ import ghidra.framework.options.Options;
 import ghidra.program.database.ProgramDB;
 import ghidra.program.database.code.CodeManager;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressOutOfBoundsException;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.data.DataType;
@@ -36,6 +37,10 @@ public class GCAnalyzer extends AbstractAnalyzer {
     private static final String SEARCH_SDA_REGISTERS_OPTION = "Search for SDA & SDA2 (ToC) Registers Initialization";
     private static final String SEARCH_GQR_REGISTERS_OPTION = "Search for GQR Registers Initialization";
     
+    public static final String OPTION_INFO_SDA_VALUE = "SDA Value";
+    public static final String OPTION_INFO_SDA2_VALUE = "SDA2 Value";
+    public static final String OPTION_INFO_GQR_VALUE = "GQR%d Value";
+    
     private boolean searchSDARegs = true;
     private boolean searchGQRRegs = true;
     
@@ -45,12 +50,8 @@ public class GCAnalyzer extends AbstractAnalyzer {
 
     @Override
     public boolean getDefaultEnablement(Program program) {
-        if (program.getLanguageID().getIdAsString().equals("PowerPC:BE:32:Gekko_Broadway") &&
-                program.getExecutableFormat().equals(GameCubeLoader.BIN_NAME)) {
-            return true;
-        }
-
-        return false;
+        return program.getLanguageID().getIdAsString().equals("PowerPC:BE:32:Gekko_Broadway") &&
+                program.getExecutableFormat().equals(GameCubeLoader.BIN_NAME);
     }
     
     @Override
@@ -63,7 +64,7 @@ public class GCAnalyzer extends AbstractAnalyzer {
     
     @Override
     public void registerOptions(Options options, Program program) {
-        options.registerOption(GCAnalyzer.SEARCH_SDA_REGISTERS_OPTION, OptionType.BOOLEAN_TYPE, true, null, "");
+        options.registerOption(GCAnalyzer.SEARCH_SDA_REGISTERS_OPTION, OptionType.BOOLEAN_TYPE, true, null, "Look where TOC Registers are set and apply their values to every instructions for accurate data usage.");
         options.registerOption(GCAnalyzer.SEARCH_GQR_REGISTERS_OPTION, OptionType.BOOLEAN_TYPE, true, null, "");
     }
     
@@ -81,52 +82,73 @@ public class GCAnalyzer extends AbstractAnalyzer {
         var setSDA = false;
         var setSDA2 = false;
         
-        if (this.searchSDARegs == true) {
+        registerProgramOptions(program);
+
+        if (this.searchSDARegs) {
             monitor.setMessage("Searching for SDA register (r13)...");
-            var r13 = trySetDefaultRegisterValue("r13", program, monitor);
+            monitor.setIndeterminate(true);
+            Address r13 = getCachedOrTrySetDefaultRegisterValue("r13", OPTION_INFO_SDA_VALUE, program, monitor);
             setSDA = r13 != null;
-            if (setSDA == false) {
+            if (!setSDA) {
                 Msg.warn(this, "Failed to set the SDA register (r13) value!");
             }
-            monitor.setProgress(10);
         
             monitor.setMessage("Searching for SDA2 (ToC) register (r2)...");
-            var r2 = trySetDefaultRegisterValue("r2", program, monitor);
+            monitor.setIndeterminate(true);
+            var r2 = getCachedOrTrySetDefaultRegisterValue("r2", OPTION_INFO_SDA2_VALUE, program, monitor);
             setSDA2 = r2 != null;
-            if (setSDA2 == false) {
+            if (!setSDA2) {
                 Msg.warn(this, "Failed to set the SDA2 (ToC) register (r2) value!");
             }
-            
+
             int numUpdated = 0;
             var addressSpace = program.getAddressFactory().getDefaultAddressSpace();
             var codeManager = ((ProgramDB)program).getCodeManager();
+            monitor.setIndeterminate(false);
+            // Using getNumInstructions as an estimate
+            monitor.initialize(codeManager.getNumInstructions(), "Applying SDA and SDA2 registers...");
             for (Instruction instruction : codeManager.getInstructions(addressSpace.getMinAddress(), true)) {
                 if (updateInstruction(program, r2, r13, instruction)) {
                     numUpdated++;
                 }
+                monitor.incrementProgress();
             }
-            Msg.debug(this, "Updated " + numUpdated + " SDA references");
+            Msg.debug(this, String.format("Updated %d SDA and SDA2 references", numUpdated));
         }
-        monitor.setProgress(20);
         
         
         var setGQRs = false;
-        if (this.searchGQRRegs == true) {
+        if (this.searchGQRRegs) {
+            monitor.initialize(8, "Searching for GQR register...");
             for (var i = 0; i < 8; i++) {
                 monitor.setMessage(String.format("Searching for GQR%d register...", i));
-                var setGQR = trySetGQRegister(String.format("GQR%d", i), program, monitor);
-                monitor.setProgress(30 + i * 10);
-                if (setGQR == false) {
+                var setGQR = trySetGQRegisterFromCache(String.format("GQR%d", i),
+                        String.format(OPTION_INFO_GQR_VALUE, i), program, monitor);
+                monitor.setProgress(i);
+                if (!setGQR) {
                     Msg.warn(this, String.format("Failed to set the GQR%d register value!", i));
                 }
                 setGQRs |= setGQR;
             }
         }
-        monitor.setProgress(100);
         
         return setSDA | setSDA2 | setGQRs;
     }
 
+    protected void registerProgramOptions(Program program) {
+        Options programInfo = program.getOptions(Program.PROGRAM_INFO);
+        if (!programInfo.isRegistered(OPTION_INFO_SDA_VALUE))
+            programInfo.registerOption(OPTION_INFO_SDA_VALUE, -1L, null, "Address where SDA (r13) is located at");
+        if (!programInfo.isRegistered(OPTION_INFO_SDA2_VALUE))
+            programInfo.registerOption(OPTION_INFO_SDA2_VALUE, -1L, null, "Address where SDA2 (r2) is located at");
+        for (int i = 0; i < 8; ++i) {
+            String optionName = String.format(OPTION_INFO_GQR_VALUE, i);
+            if (!programInfo.isRegistered(optionName))
+                programInfo.registerOption(optionName, -1L, null,
+                        String.format("Value what GQR%d holds", i));
+        }
+    }
+    
     protected boolean setRegisterValue(String registerName, long defaultValue, Program program, CodeManager cm, AddressSpace addrSpace) {
         Register reg = program.getRegister(registerName);
         Address startAddr = cm.getInstructionAfter(addrSpace.getMinAddress()).getAddress();
@@ -141,6 +163,25 @@ public class GCAnalyzer extends AbstractAnalyzer {
         var result =  cmd.applyTo(program);
         Msg.debug(this, String.format("Reg value: %08X", program.getProgramContext().getRegisterValue(reg, startAddr).getUnsignedValue().longValue()));
         return result;
+    }
+    
+    protected Address getCachedOrTrySetDefaultRegisterValue(String registerName, String optionName, Program program, TaskMonitor monitor) {
+        Address value = null;
+        Options programInfo = program.getOptions(Program.PROGRAM_INFO);
+        long optionValue = programInfo.getLong(optionName, -1);
+        if (optionValue != -1) {
+            try {
+                value = program.getAddressFactory().getDefaultAddressSpace().getAddress(optionValue);
+                Msg.info(this, String.format("Option \"%s\" address %08x is valid", optionName, optionValue));
+            } catch (AddressOutOfBoundsException e) {
+                Msg.error(this, String.format("Option \"%s\" address %08x is out of bounds, searching for new one", optionName, optionValue));
+            }
+        } 
+        if (value == null)
+            value = trySetDefaultRegisterValue(registerName, program, monitor);
+        if (value != null)
+            programInfo.setLong(optionName, value.getOffset());
+        return value;
     }
     
     protected Address trySetDefaultRegisterValue(String registerName, Program program, TaskMonitor monitor) {
@@ -282,8 +323,25 @@ public class GCAnalyzer extends AbstractAnalyzer {
         }
     }
     
-    protected boolean trySetGQRegister(String gqrName, Program program, TaskMonitor monitor) {
-        if (gqrName == null) return false;
+    protected boolean trySetGQRegisterFromCache(String gqrName, String optionName, Program program, TaskMonitor monitor) {
+        Options programInfo = program.getOptions(Program.PROGRAM_INFO);
+        long optionValue = programInfo.getLong(optionName, -1);
+        if (optionValue != -1) {
+            var addressSpace = program.getAddressFactory().getDefaultAddressSpace();
+            var codeManager = ((ProgramDB)program).getCodeManager();
+            if (setRegisterValue(gqrName, optionValue, program, codeManager, addressSpace))
+                return true;
+        }
+
+        long value = trySetGQRegister(gqrName, program, monitor);
+        if (value >= 0) {
+            programInfo.setLong(optionName, value);
+        }
+        return value >= 0;
+    }
+    
+    protected long trySetGQRegister(String gqrName, Program program, TaskMonitor monitor) {
+        if (gqrName == null) return -1;
         
         var addressSpace = program.getAddressFactory().getDefaultAddressSpace();
         var codeManager = ((ProgramDB)program).getCodeManager();
@@ -361,9 +419,9 @@ public class GCAnalyzer extends AbstractAnalyzer {
         }
         
         if (upperValueFound | lowerValueFound) {
-            return setRegisterValue(gqrName, defaultValue, program, codeManager, addressSpace);
+            return setRegisterValue(gqrName, defaultValue, program, codeManager, addressSpace) ? defaultValue : -1;
         }
         
-        return upperValueFound | lowerValueFound;
+        return upperValueFound | lowerValueFound ? defaultValue : -1;
     }
 }

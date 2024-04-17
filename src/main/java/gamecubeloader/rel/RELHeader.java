@@ -6,6 +6,9 @@ import gamecubeloader.common.SectionInfo;
 import ghidra.app.util.bin.BinaryReader;
 import ghidra.util.Msg;
 
+/**
+ * Represents an REL header.
+ */
 public class RELHeader {
 	public long moduleId;
 	public long previousModuleAddress;
@@ -147,8 +150,14 @@ public class RELHeader {
 		return true;
 	}
 	
+	/**
+	 * Size of the header.
+	 * This depends on the REL version, as specified in the header.
+	 * @return Size of the header in bytes.
+	 * @see #moduleVersion
+	 */
 	public int Size() {
-		switch ((int) this.moduleId) {
+		switch ((int) this.moduleVersion) {
 		case 0:
 		case 1:
 			return 0x40;

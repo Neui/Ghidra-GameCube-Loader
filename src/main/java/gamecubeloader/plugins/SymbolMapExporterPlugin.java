@@ -25,14 +25,13 @@ import java.util.Objects;
 import javax.swing.SwingUtilities;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
-import javax.swing.filechooser.FileSystemView;
-
 import docking.ActionContext;
 import docking.action.DockingAction;
 import docking.action.MenuData;
 import docking.tool.ToolConstants;
 import docking.widgets.filechooser.GhidraFileChooser;
 import docking.widgets.filechooser.GhidraFileChooserMode;
+import gamecubeloader.common.DolphinEmulatorUtil;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.app.plugin.ProgramPlugin;
 import ghidra.framework.plugintool.PluginInfo;
@@ -43,15 +42,16 @@ import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolType;
 import ghidra.util.Msg;
 import ghidra.util.filechooser.ExtensionFileFilter;
+import ghidra.util.task.TaskMonitor;
 
 /**
- * The Symbol Map Export plugin allows exporting labels and such as
- * a .map-file that can then be imported into Dolphin Emulator for debugging purpose.
+ * The Symbol Map Export plugin allows exporting labels and such to a .map-file
+ * that can then be imported into Dolphin Emulator for debugging.
  */
 //@formatter:off
 @PluginInfo(
     status = PluginStatus.RELEASED,
-    packageName = SymbolMapExporterPluginPackage.NAME,
+    packageName = GCPluginPackage.NAME,
     category = PluginCategoryNames.MISC,
     shortDescription = SymbolMapExporterPlugin.DESC,
     description = "This plugin allows exporting symbols to a format that Dolphin can understand."
@@ -62,7 +62,7 @@ public class SymbolMapExporterPlugin extends ProgramPlugin implements ChangeList
     static final String DESC = "Export Symbols to Dolphin Map Format";
     static final String NAME = "Export Symbol Map";
 
-    private String last_saved_path;
+    private String lastSavedPath;
 
     private DockingAction chooseAction;
 
@@ -86,11 +86,6 @@ public class SymbolMapExporterPlugin extends ProgramPlugin implements ChangeList
         enableActions();
     }
 
-    @Override
-    protected void cleanup() {
-        super.cleanup();
-    }
-
     /**
      * Method to create the menu entry.
      */
@@ -98,12 +93,12 @@ public class SymbolMapExporterPlugin extends ProgramPlugin implements ChangeList
         DockingAction action = new DockingAction("Export Symbols", getName()) {
             @Override
             public void actionPerformed(ActionContext context) {
-                exportToFile();
+                exportToFile(null);
             }
         };
-        action.setMenuBarData(
-                new MenuData(new String[] { ToolConstants.MENU_TOOLS, SymbolMapExporterPlugin.NAME,
-                "Export to .map file..." }, null, MENU_GROUP_1, MenuData.NO_MNEMONIC, "1"));
+        action.setMenuBarData(new MenuData(
+                new String[] { ToolConstants.MENU_TOOLS, SymbolMapExporterPlugin.NAME, "Export to .map file..." }, null,
+                MENU_GROUP_1, MenuData.NO_MNEMONIC, "1"));
         action.setDescription("Export Symbols to a .map file that Dolphin Emulator can load");
         tool.addAction(action);
         chooseAction = action;
@@ -111,8 +106,10 @@ public class SymbolMapExporterPlugin extends ProgramPlugin implements ChangeList
 
     /**
      * Determines whenever the symbol name is a Ghidra default symbol name.
+     * 
      * @param symbolName The symbol name to rate.
-     * @return true whenever the given symbol name is a Ghirda default generated label, false otherwise.
+     * @return true whenever the given symbol name is a Ghirda default generated
+     *         label, false otherwise.
      */
     private static boolean isGhidraDefaultName(String symbolName) {
         Objects.requireNonNull(symbolName);
@@ -121,9 +118,7 @@ public class SymbolMapExporterPlugin extends ProgramPlugin implements ChangeList
             return true;
 
         // Switch-case stuff are basically always uninteresting
-        if (symbolName.startsWith("caseD_")
-                || symbolName.startsWith("switchD_")
-                || symbolName.startsWith("PTR_caseD_"))
+        if (symbolName.startsWith("caseD_") || symbolName.startsWith("switchD_") || symbolName.startsWith("PTR_caseD_"))
             return true;
 
         return false;
@@ -131,50 +126,17 @@ public class SymbolMapExporterPlugin extends ProgramPlugin implements ChangeList
 
     /**
      * Try to identify the GameID to use as the filename.
-     * @return GameID like GAMEP01, or null if it could not be determined.
+     * 
+     * @return GameID like {@code "GAMP01"}, or {@code null} if it could not be
+     *         determined.
      */
     private String getGameID() {
         return null; // Currently seemingly impossible in a consistent way
     }
 
     /**
-     * Try to find the path of an dolphin installation to make a convenient
-     * default location so you can directly load into Dolphin.
-     * @return The directory to dolphin Maps folder, or null if not found.
-     */
-    private File getDolphinPath() {
-        var user_home = System.getProperty("user.home");
-        if (user_home == null) {
-            return null;
-        }
-
-        var possible_paths = new ArrayList<String>(5);
-
-        if (System.getProperty("os.name", "Unknown").toUpperCase().startsWith("WINDOWS")) {
-            var default_path = FileSystemView.getFileSystemView().getDefaultDirectory().getPath();
-            possible_paths.add(default_path + "/Dolphin Emulator/");
-        }
-
-        possible_paths.add(user_home + "/.dolphin-emu/");
-
-        var xdg_data_home = System.getenv("XDG_DATA_HOME");
-        if (xdg_data_home == null || xdg_data_home.isBlank()) {
-            xdg_data_home = user_home + "/" + ".local/share";
-        }
-        possible_paths.add(xdg_data_home + "/dolphin-emu/");
-
-        for (var path : possible_paths) {
-            var dir = new File(path);
-            if (dir.exists()) {
-                return dir;
-            }
-        }
-
-        return null;
-    }
-
-    /**
      * Asks the user to choose the location and file name to save in.
+     * 
      * @return The file to save to, or null if cancelled or something.
      */
     private File chooseFile() {
@@ -183,32 +145,32 @@ public class SymbolMapExporterPlugin extends ProgramPlugin implements ChangeList
         fileChooser.setTitle("Select where to save the map file");
         fileChooser.setFileSelectionMode(GhidraFileChooserMode.FILES_ONLY);
 
-        if (last_saved_path != null) {
-            fileChooser.setSelectedFile(new File(last_saved_path));
+        if (lastSavedPath != null) {
+            fileChooser.setSelectedFile(new File(lastSavedPath));
         } else {
-            var dolphinPath = getDolphinPath();
+            File dolphinPath = DolphinEmulatorUtil.getGlobalUserFolder("Maps");
             if (dolphinPath != null) {
                 var name = getGameID();
                 if (name == null)
                     name = this.currentProgram.getName().toString();
                 if (name == null)
                     name = "";
-                var file = new File(dolphinPath, "Maps/" + name + ".map");
+                var file = new File(dolphinPath, name + ".map");
                 fileChooser.setSelectedFile(file);
             }
         }
 
-        var selected_file = fileChooser.getSelectedFile(true);
-        if (selected_file != null) {
-            this.last_saved_path = selected_file.getAbsolutePath();
+        var selectedFile = fileChooser.getSelectedFile(true);
+        if (selectedFile != null) {
+            this.lastSavedPath = selectedFile.getAbsolutePath();
         }
-        return selected_file;
+        return selectedFile;
     }
 
     /**
      * Ask the user where to export the symbol map and export the symbol map.
      */
-    private void exportToFile() {
+    private void exportToFile(TaskMonitor monitor) {
         var selectedFile = chooseFile();
         if (selectedFile == null) {
             Msg.info(this, "Symbol map export file chooser has been cancelled or similar.");
@@ -216,9 +178,8 @@ public class SymbolMapExporterPlugin extends ProgramPlugin implements ChangeList
         }
 
         long startTime = System.currentTimeMillis();
-        try (var fileWriter = new FileWriter(selectedFile);
-                var writer = new PrintWriter(fileWriter)) {
-            exportToFile(writer);
+        try (var fileWriter = new FileWriter(selectedFile); var writer = new PrintWriter(fileWriter)) {
+            exportToFile(writer, monitor);
         } catch (IOException e) {
             Msg.error(this, "Failed to write symbol map", e);
             return;
@@ -232,20 +193,28 @@ public class SymbolMapExporterPlugin extends ProgramPlugin implements ChangeList
 
     /**
      * Export the symbols to the symbol map.
+     * 
      * @param writer Where to write the information to.
      * @throws IOException When some writing error occurs.
      */
-    private void exportToFile(PrintWriter writer) throws IOException {
+    private void exportToFile(PrintWriter writer, TaskMonitor monitor) throws IOException {
         var symTable = this.currentProgram.getSymbolTable();
-        var codeMgr = ((ProgramDB)this.currentProgram).getCodeManager();
+        var codeMgr = ((ProgramDB) this.currentProgram).getCodeManager();
         var memory = this.currentProgram.getMemory();
 
         var functionSymbols = new ArrayList<Symbol>(500); // Rough estimation
         var dataSymbols = new ArrayList<Symbol>(1000); // Rough estimation
         var totalSymbols = 0L;
 
+        if (monitor != null) {
+            monitor.initialize(symTable.getNumSymbols(), "Filtering symbols...");
+        }
+
         for (var sym : symTable.getAllSymbols(true)) {
             totalSymbols++;
+            if (monitor != null) {
+                monitor.incrementProgress();
+            }
             var addr = sym.getAddress().getUnsignedOffset();
             if (addr < 0x80000000L || addr >= 0x81800000L)
                 continue; // Ignore out of range addresses
@@ -260,13 +229,19 @@ public class SymbolMapExporterPlugin extends ProgramPlugin implements ChangeList
             }
         }
 
-        Msg.debug(this, String.format(
-                "Number of function symbols: %d, data symbols: %d, ignored: %d",
-                functionSymbols.size(), dataSymbols.size(),
-                totalSymbols - functionSymbols.size() - dataSymbols.size()));
+        Msg.debug(this,
+                String.format("Number of function symbols: %d, data symbols: %d, ignored: %d", functionSymbols.size(),
+                        dataSymbols.size(), totalSymbols - functionSymbols.size() - dataSymbols.size()));
+
+        if (monitor != null) {
+            monitor.initialize(functionSymbols.size() + dataSymbols.size(), "Writing symbol map to file...");
+        }
 
         writer.println(".text section layout");
         for (var sym : functionSymbols) {
+            if (monitor != null) {
+                monitor.incrementProgress();
+            }
             var addr = sym.getAddress().getUnsignedOffset();
             var symName = sym.getName(true);
 
@@ -274,10 +249,12 @@ public class SymbolMapExporterPlugin extends ProgramPlugin implements ChangeList
             var size = 1L;
             var func = this.currentProgram.getFunctionManager().getFunctionAt(sym.getAddress());
             if (func != null) {
-                size = func.getBody().getMaxAddress().getUnsignedOffset() - func.getBody().getMinAddress().getUnsignedOffset() + 1;
+                size = func.getBody().getMaxAddress().getUnsignedOffset()
+                        - func.getBody().getMinAddress().getUnsignedOffset() + 1;
                 alignment = 4;
             } else {
-                Msg.info(this, "Symbol " + symName + " claims to be a function, but no function found at their address!");
+                Msg.info(this, String
+                        .format("Symbol %s claims to be a function, but no function found at their address!", symName));
                 var memBlock = memory.getBlock(sym.getAddress());
                 if (memBlock != null && !memBlock.isExecute()) {
                     var data = codeMgr.getDataAt(sym.getAddress());
@@ -290,13 +267,15 @@ public class SymbolMapExporterPlugin extends ProgramPlugin implements ChangeList
                     }
                 }
             }
-            writer.println(String.format("%08x %08x %08x % 2d %s",
-                    addr, size, addr, alignment, symName));
+            writer.println(String.format("%08x %08x %08x % 2d %s", addr, size, addr, alignment, symName));
         }
 
         writer.println();
         writer.println(".data section layout");
         for (var sym : dataSymbols) {
+            if (monitor != null) {
+                monitor.incrementProgress();
+            }
             var addr = sym.getAddress().getUnsignedOffset();
             var symName = sym.getName(true);
 
@@ -314,13 +293,15 @@ public class SymbolMapExporterPlugin extends ProgramPlugin implements ChangeList
                 }
             }
 
-            writer.println(String.format("%08x %08x %08x % 2d %s",
-                    addr, size, addr, alignment, symName));
+            writer.println(String.format("%08x %08x %08x % 2d %s", addr, size, addr, alignment, symName));
         }
+
+        monitor.initialize(0, "Finished writing symbol map to file!");
     }
 
     /**
-     * Method to properly set action enablement based upon appropriate business logic.
+     * Method to properly set action enablement based upon appropriate business
+     * logic.
      */
     private void enableActions() {
         chooseAction.setEnabled(true);

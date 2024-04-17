@@ -1,6 +1,8 @@
 package gamecubeloader.common;
 
 import java.util.ArrayList;
+import java.util.Map;
+
 import ghidra.app.util.demangler.DemangledDataType;
 import ghidra.app.util.demangler.DemangledException;
 import ghidra.app.util.demangler.DemangledFunction;
@@ -14,9 +16,12 @@ import ghidra.app.util.demangler.DemanglerOptions;
 import ghidra.program.model.listing.Program;
 import ghidra.util.map.TypeMismatchException;
 
+/**
+ * Demangler for CodeWarrior used by Nintendo GameCube and Wii software.
+ */
 public final class CodeWarriorDemangler implements Demangler {
-    public final String CODEWARRIOR_DEMANGLE_PROP = "DemangleCW"; /* When defined, forces CodeWarrior demangling on all symbols. */
-    public final String CODEWARRIOR_NO_DEMANGLE_PROP = "NoDemangleCW"; /* When defined, prevents CodeWarrior demangling on all symbols. */
+    public static final String CODEWARRIOR_DEMANGLE_PROP = "DemangleCW"; /* When defined, forces CodeWarrior demangling on all symbols. */
+    public static final String CODEWARRIOR_NO_DEMANGLE_PROP = "NoDemangleCW"; /* When defined, prevents CodeWarrior demangling on all symbols. */
     
     public String str;
     public boolean containsInvalidSpecifier;
@@ -342,13 +347,61 @@ public final class CodeWarriorDemangler implements Demangler {
             return new DemangledDataType(null, DemangledDataType.VARARGS, DemangledDataType.VARARGS);
         } else {
             // Unknown.
-            this.containsInvalidSpecifier = this.containsInvalidSpecifier || tok != '_'; // This is here in case the __ is preceded by more underscores.
+            // This is here in case the __ is preceded by more underscores.
+            this.containsInvalidSpecifier = this.containsInvalidSpecifier || tok != '_';
             return new DemangledDataType(null, DemangledDataType.UNDEFINED, DemangledDataType.UNDEFINED);
         }
     }
+    
+    private static final Map<String, String> specialOperatorMap = Map.ofEntries(
+            Map.entry("nw", "operator new"),
+            Map.entry("nwa", "operator new[]"),
+            Map.entry("dl", "operator delete"),
+            Map.entry("dla", "operator delete[]"),
+            Map.entry("pl", "operator +"),
+            Map.entry("mi", "operator -"),
+            Map.entry("ml", "operator *"),
+            Map.entry("dv", "operator /"),
+            Map.entry("md", "operator %"),
+            Map.entry("er", "operator ^"),
+            Map.entry("ad", "operator &"), // not sure about this one.
+            Map.entry("or", "operator |"),
+            Map.entry("co", "operator ~"),
+            Map.entry("nt", "operator !"),
+            Map.entry("as", "operator ="),
+            Map.entry("lt", "operator <"),
+            Map.entry("gt", "operator >"),
+            Map.entry("apl", "operator +="),
+            Map.entry("ami", "operator -="),
+            Map.entry("amu", "operator *="),
+            Map.entry("adv", "operator /="),
+            Map.entry("amd", "operator %="),
+            Map.entry("aer", "operator ^="),
+            Map.entry("aad", "operator &="),
+            Map.entry("aor", "operator |="),
+            Map.entry("ls", "operator <<"),
+            Map.entry("rs", "operator >>"),
+            Map.entry("ars", "operator >>="),
+            Map.entry("als", "operator <<="),
+            Map.entry("eq", "operator =="),
+            Map.entry("ne", "operator !="),
+            Map.entry("le", "operator <="),
+            Map.entry("ge", "operator >="), // not sure
+            Map.entry("aa", "operator &&"),
+            Map.entry("oo", "operator ||"),
+            Map.entry("pp", "operator ++"),
+            Map.entry("mm", "operator --"),
+            Map.entry("cl", "operator ()"),
+            Map.entry("vc", "operator []"),
+            Map.entry("rf", "operator ->"),
+            Map.entry("cm", "operator ,"),
+            Map.entry("rm", "operator ->*")
+            );
 
     private static String demangleSpecialOperator(String symbolName) {
         if (symbolName.startsWith("__")) {
+            return specialOperatorMap.get(symbolName.substring(2));
+            /*
             switch (symbolName.substring(2)) {
                 case "nw":
                     return "operator new";
@@ -434,7 +487,7 @@ public final class CodeWarriorDemangler implements Demangler {
                     return "operator ,";
                 case "rm":
                     return "operator ->*";
-            }
+            }*/
         }
         
         return null;
@@ -443,10 +496,9 @@ public final class CodeWarriorDemangler implements Demangler {
     @Override
     public boolean canDemangle(Program program) {
         try {
-            final boolean canDemangle = (program.getLanguageID().getIdAsString().equals("PowerPC:BE:32:Gekko_Broadway") ||
+            return (program.getLanguageID().getIdAsString().equals("PowerPC:BE:32:Gekko_Broadway") ||
                 program.getUsrPropertyManager().getVoidPropertyMap(CODEWARRIOR_DEMANGLE_PROP) != null) &&
                 program.getUsrPropertyManager().getVoidPropertyMap(CODEWARRIOR_NO_DEMANGLE_PROP) == null;
-            return canDemangle;
         }
         catch (TypeMismatchException e) {
             return false;
@@ -454,7 +506,6 @@ public final class CodeWarriorDemangler implements Demangler {
     }
 
     @Override
-    @SuppressWarnings("removal")
     public DemangledObject demangle(String mangled, boolean demangleOnlyKnownPatterns) throws DemangledException {
         return CodeWarriorDemangler.demangleSymbol(mangled);
     }

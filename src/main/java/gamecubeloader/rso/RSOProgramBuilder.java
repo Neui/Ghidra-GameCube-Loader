@@ -245,79 +245,16 @@ public class RSOProgramBuilder {
 			throws MemoryAccessException {
 		var targetAddress = translatePhysicalAddress(relocation.offset);
 		var addressValue = addr + relocation.addend;
-
 		var originalValue = memory.getInt(targetAddress);
-		var writeValue = 0L;
 
 		var relocationType = relocation.getRelocationType();
-		switch (relocationType) {
-			case R_PPC_ADDR16_HA:
-				writeValue = (addressValue >> 16) & 0xFFFF;
-				if ((addressValue & 0x8000) != 0) {
-					writeValue += 1;
-				}
-
-				memory.setShort(targetAddress, (short)writeValue, true);
-				break;
-
-			case R_PPC_ADDR24:
-				writeValue = (addressValue & 0x3FFFFFC) |
-						(originalValue & 0xFC000003);
-
-				memory.setInt(targetAddress, (int)writeValue, true);
-				break;
-
-			case R_PPC_ADDR32:
-				memory.setInt(targetAddress, (int)addressValue, true);
-				break;
-
-			case R_PPC_ADDR16:
-			case R_PPC_ADDR16_LO:
-				writeValue = (addressValue) & 0xFFFF;
-
-				memory.setShort(targetAddress, (short)writeValue, true);
-				break;
-
-			case R_PPC_ADDR16_HI:
-				writeValue = ((addressValue) >> 16) & 0xFFFF;
-
-				memory.setShort(targetAddress, (short)writeValue, true);
-				break;
-
-			case R_PPC_NONE:
-				break;
-
-			case R_PPC_REL24:
-				writeValue = ((addressValue - targetAddress.getOffset()) & 0x3FFFFFC) |
-						(originalValue & 0xFC000003);
-
-				memory.setInt(targetAddress, (int)writeValue, true);
-				break;
-
-			case R_PPC_ADDR14:
-			case R_PPC_ADDR14_BRNTAKEN:
-			case R_PPC_ADDR14_BRTAKEN:
-				writeValue = (addressValue & 0xFFFC) |
-						(originalValue & 0xFFFF0003);
-
-				memory.setInt(targetAddress, (int)writeValue, true);
-				break;
-
-			case R_PPC_REL14:
-				writeValue = ((addressValue- targetAddress.getOffset()) & 0xFFFC) |
-						(originalValue & 0xFFFF0003);
-
-				memory.setInt(targetAddress, (int)writeValue, true);
-				break;
-
-			default:
-				Msg.warn(this, String.format("Relocations: Unsupported relocation type %X", relocationType));
-				break;
+		if (!RelocationUtil.apply(memory, true, targetAddress, addressValue, (int)relocationType)) {
+            Msg.warn(this, String.format("Relocations: Unsupported relocation type %X", relocationType));
+		} else {
+    		long newValue = memory.getInt(targetAddress) & 0xFFFFFFFFL;
+    		relocationTable.add(targetAddress, Status.APPLIED, relocationType, new long[] { newValue },
+    				Ints.toByteArray(originalValue), symbolName);
 		}
-
-		long newValue = memory.getInt(targetAddress) & 0xFFFFFFFFL;
-		relocationTable.add(targetAddress, Status.APPLIED, relocationType, new long[] { newValue },
-				Ints.toByteArray(originalValue), symbolName);
 	}
 
 	private Address translatePhysicalAddress(long physicalAddress) {

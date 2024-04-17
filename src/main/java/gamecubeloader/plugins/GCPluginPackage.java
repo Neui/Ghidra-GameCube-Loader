@@ -19,13 +19,13 @@ import ghidra.framework.plugintool.util.PluginPackage;
 import resources.ResourceManager;
 
 /**
- * Plugin package for the Symbol Map Exporter plugin.
+ * Plugin package for GameCube and Wii related stuff.
  */
-public class SymbolMapExporterPluginPackage extends PluginPackage {
-    public static final String NAME = "Symbol Map Exporter for Dolphin Emulator";
+public class GCPluginPackage extends PluginPackage {
+    public static final String NAME = "GameCube & Wii Plugins";
 
-    public SymbolMapExporterPluginPackage() {
+    public GCPluginPackage() {
         super(NAME, ResourceManager.loadImage("images/vcard.png"),
-                "For exporting symbols to map files for Dolphin Emulator");
+                "Tools to help decompile for GameCube & Wii.");
     }
 }

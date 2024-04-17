@@ -14,9 +14,9 @@ import docking.widgets.filechooser.GhidraFileChooser;
 import gamecubeloader.common.SystemMemorySections;
 import gamecubeloader.common.SymbolInfo;
 import gamecubeloader.common.SymbolLoader;
-import gamecubeloader.common.Yaz0;
 import gamecubeloader.dol.DOLHeader;
 import gamecubeloader.dol.DOLProgramBuilder;
+import gamecubeloader.yaz0.Yaz0;
 import ghidra.app.util.MemoryBlockUtils;
 import ghidra.app.util.bin.BinaryReader;
 import ghidra.app.util.bin.ByteProvider;
@@ -33,6 +33,9 @@ import ghidra.util.Msg;
 import ghidra.util.filechooser.ExtensionFileFilter;
 import ghidra.util.task.TaskMonitor;
 
+/**
+ * Loads an REL file for Ghidra.
+ */
 public class RELProgramBuilder  {
 	private RELHeader rel;
 	
@@ -162,9 +165,8 @@ public class RELProgramBuilder  {
 				ByteProvider relProvider = new FileByteProvider(files[i], null, AccessMode.READ);
 				var relReader = new BinaryReader(relProvider, false);
 				
-				var yaz0 = new Yaz0();
-				if (yaz0.IsValid(relProvider)) {
-					relProvider = yaz0.Decompress(relProvider);
+				if (Yaz0.hasMagic(relProvider)) {
+					relProvider = Yaz0.parseAndDecompress(relProvider);
 					relReader = new BinaryReader(relProvider, false);
 				}
 				
