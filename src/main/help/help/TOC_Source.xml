@@ -50,6 +50,6 @@
 
 <tocroot>
 	<tocref id="Ghidra Functionality">
-		<tocdef id="GCWiiMain" text="GameCube and Wii" target="help/topics/gamecubeloader/help.html" />
+		<tocdef id="GCWiiMain" text="GameCube and Wii Support" target="help/topics/gamecubeloader/help.html" />
 	</tocref>
 </tocroot>
