@@ -216,6 +216,8 @@ public class RELLoader extends AbstractLibrarySupportLoader {
                 sectionIndexToAddress.put(i, baseBSS);
                 MemoryBlockUtils.createUninitializedBlock(program, false, namePrefix + blockName, baseBSS,
                         rel.header.bssSize, comment, provider.getName(), true, true, false, log);
+            } else if (section.size == 0) {
+                log.appendMsg(String.format("Section #%d with offset 0x%x has a size of 0", i, section.dataOffset));
             } else {
                 Address address = addressSpace.getAddress(base + section.dataOffset);
                 sectionToAddress.put(section, address);
